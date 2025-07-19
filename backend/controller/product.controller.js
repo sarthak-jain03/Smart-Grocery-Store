@@ -1,6 +1,6 @@
 import Product from "../models/product.model.js";
-import axios from "axios";
-
+import { spawn } from "child_process";
+import path from "path";
 
 export const addProduct = async (req, res) => {
   try {
@@ -18,61 +18,66 @@ export const addProduct = async (req, res) => {
     const images = req.files?.map((file) => file.filename);
 
     if (
-      !name ||
-      !price ||
-      !description ||
-      !category ||
-      !company ||
-      inventory === undefined ||
-      daysToExpiry === undefined ||
-      demand === undefined
+      !name || !price || !description || !category || !company ||
+      inventory === undefined || daysToExpiry === undefined || demand === undefined
     ) {
       return res.status(400).json({
         success: false,
-        message: "All fields including images, inventory, expiry, demand, and company are required",
+        message: "All fields are required",
       });
     }
 
+    
+    let offerPrice = price;
 
-    let offerPrice = price; 
-    try {
-      const { data } = await axios.post("http://127.0.0.1:8000/predict", {
-        product_name: name,
-        company_name: company,
-        product_type: category,
-        base_price: parseFloat(price),
-        days_to_expiry: parseInt(daysToExpiry),
-        inventory: parseInt(inventory),
-        demand: parseInt(demand),
-      });
+    const scriptPath = path.join(process.cwd(), "predictor.py");
 
-      if (data && data.predicted_price) {
-        offerPrice = data.predicted_price;
-      }
-    } catch (error) {
-      console.error("Prediction API error:", error.message);
-    }
-
-    const product = new Product({
+    const prediction = spawn("python", [
+      scriptPath,
       name,
-      price,
-      offerPrice,
-      description: description.split(",").map((d) => d.trim()),
-      category,
       company,
-      image: images,
-      inventory,
+      category,
+      price,
       daysToExpiry,
+      inventory,
       demand,
-      inStock: true,
+    ]);
+
+    let result = "";
+    prediction.stdout.on("data", (data) => {
+      result += data.toString();
     });
 
-    const savedProduct = await product.save();
+    prediction.stderr.on("data", (data) => {
+      console.error(`Python error: ${data.toString()}`);
+    });
 
-    return res.status(201).json({
-      success: true,
-      product: savedProduct,
-      message: "Product added successfully",
+    prediction.on("close", async (code) => {
+      if (code === 0 && result) {
+        offerPrice = parseFloat(result.trim());
+      }
+
+      const product = new Product({
+        name,
+        price,
+        offerPrice,
+        description: description.split(",").map((d) => d.trim()),
+        category,
+        company,
+        image: images,
+        inventory,
+        daysToExpiry,
+        demand,
+        inStock: true,
+      });
+
+      const savedProduct = await product.save();
+
+      return res.status(201).json({
+        success: true,
+        product: savedProduct,
+        message: "Product added successfully",
+      });
     });
   } catch (error) {
     console.error("Error in addProduct:", error.message);
@@ -82,6 +87,7 @@ export const addProduct = async (req, res) => {
     });
   }
 };
+
 
 
 export const getProducts = async (req, res) => {
@@ -96,7 +102,6 @@ export const getProducts = async (req, res) => {
     });
   }
 };
-
 
 export const getProductById = async (req, res) => {
   try {
@@ -114,7 +119,6 @@ export const getProductById = async (req, res) => {
     });
   }
 };
-
 
 export const changeStock = async (req, res) => {
   try {

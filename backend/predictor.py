@@ -1,45 +1,25 @@
-from fastapi import FastAPI
-from pydantic import BaseModel
+import sys
 import joblib
-import pandas as pd
-import os
+import numpy as np
 
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+_, product_name, company_name, product_type, base_price, days_to_expiry, inventory, demand = sys.argv
+
+model = joblib.load("model.pkl")
+product_encoder = joblib.load("product_encoder.pkl")
+company_encoder = joblib.load("company_encoder.pkl")
+category_encoder = joblib.load("category_encoder.pkl")
 
 
-model = joblib.load(os.path.join(BASE_DIR, "ml", "model.pkl"))
-product_encoder = joblib.load(os.path.join(BASE_DIR, "ml", "product_encoder.pkl"))
-company_encoder = joblib.load(os.path.join(BASE_DIR, "ml", "company_encoder.pkl"))
-category_encoder = joblib.load(os.path.join(BASE_DIR, "ml", "category_encoder.pkl"))
-
-app = FastAPI()
+encoded_product = product_encoder.transform([product_name])[0]
+encoded_company = company_encoder.transform([company_name])[0]
+encoded_category = category_encoder.transform([product_type])[0]
 
 
-class PredictionRequest(BaseModel):
-    product_name: str
-    company_name: str
-    product_type: str
-    base_price: float
-    days_to_expiry: int
-    inventory: int
-    demand: int
+input_array = np.array([[encoded_product, encoded_company, encoded_category,
+                         float(base_price), int(days_to_expiry),
+                         int(inventory), int(demand)]])
 
-@app.post("/predict")
-def predict_price(request: PredictionRequest):
-    try:
-        input_data = [
-            product_encoder.transform([request.product_name])[0],
-            company_encoder.transform([request.company_name])[0],
-            category_encoder.transform([request.product_type])[0],
-            request.base_price,
-            request.days_to_expiry,
-            request.inventory,
-            request.demand
-        ]
-        prediction = model.predict([input_data])[0]
-        final_price = round(min(prediction, request.base_price), 2)
 
-        return {"predicted_price": final_price}
-    except Exception as e:
-        return {"error": str(e)}
+predicted_price = model.predict(input_array)[0]
+print(round(predicted_price, 2))
